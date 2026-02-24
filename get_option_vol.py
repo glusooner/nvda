@@ -6,7 +6,7 @@ import yfinance as yf
 from scipy.stats import norm
 
 
-TICKERS = ["NVDA"]
+TICKERS = ["NVDA", "TSLA"]
 TICKERS2 = ["SPY", "TSLA", "NVDA"]
 
 OUTPUT_DIR = "option_data"
@@ -190,15 +190,21 @@ def download_full_chain_with_delta(symbol: str) -> pd.DataFrame | None:
 
 
 def main():
+    all_dfs = []
     for symbol in TICKERS:
         df = download_full_chain_with_delta(symbol)
-        if df is None:
-            continue
+        if df is not None:
+            all_dfs.append(df)
 
-        date_tag = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-        out_path = os.path.join(OUTPUT_DIR, f"{symbol}_options_with_spot_delta_{date_tag}.csv")
-        df.to_csv(out_path, index=False)
-        print(f"Saved: {out_path}  ({len(df):,} rows)")
+    if not all_dfs:
+        print("No data collected.")
+        return
+
+    combined_df = pd.concat(all_dfs, ignore_index=True)
+    date_tag = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    out_path = os.path.join(OUTPUT_DIR, f"combined_options_with_spot_delta_{date_tag}.csv")
+    combined_df.to_csv(out_path, index=False)
+    print(f"\nFinal Combined Saved: {out_path} ({len(combined_df):,} rows)")
 
 
 if __name__ == "__main__":
