@@ -9,33 +9,60 @@ OUTPUT_DIR = "option_data"
 RISK_FREE_RATE = 0.045
 DIVIDEND_YIELD = 0.0
 
-def bs_delta(S: float, K: float, T: float, r: float, q: float, sigma: float, option_type: str) -> float:
+def bs_greeks(S: float, K: float, T: float, r: float, q: float, sigma: float, option_type: str):
+    """Returns (delta, gamma, vega, theta) using Black-Scholes."""
     if not np.isfinite(S) or not np.isfinite(K) or not np.isfinite(T) or not np.isfinite(sigma):
-        return np.nan
+        return np.nan, np.nan, np.nan, np.nan
     if S <= 0 or K <= 0 or T <= 0 or sigma <= 0:
-        return np.nan
+        return np.nan, np.nan, np.nan, np.nan
 
-    d1 = (np.log(S / K) + (r - q + 0.5 * sigma * sigma) * T) / (sigma * np.sqrt(T))
+    sqrtT = np.sqrt(T)
+    d1 = (np.log(S / K) + (r - q + 0.5 * sigma * sigma) * T) / (sigma * sqrtT)
+    d2 = d1 - sigma * sqrtT
+    
+    n_d1 = norm.pdf(d1)
+    N_d1 = norm.cdf(d1)
+    N_d2 = norm.cdf(d2)
+    N_minus_d1 = norm.cdf(-d1)
+    N_minus_d2 = norm.cdf(-d2)
+
+    exp_qT = np.exp(-q * T)
+    exp_rT = np.exp(-r * T)
+
+    # Gamma and Vega are the same for Calls and Puts
+    gamma = (exp_qT * n_d1) / (S * sigma * sqrtT)
+    vega = (S * exp_qT * n_d1 * sqrtT) / 100.0  # Common to report per 1% vol change
+
     if option_type.lower() == "call":
-        return float(np.exp(-q * T) * norm.cdf(d1))
+        delta = exp_qT * N_d1
+        theta = (-(S * sigma * exp_qT * n_d1) / (2 * sqrtT) 
+                 - r * K * exp_rT * N_d2 
+                 + q * S * exp_qT * N_d1)
     else:
-        return float(-np.exp(-q * T) * norm.cdf(-d1))
+        delta = -exp_qT * N_minus_d1
+        theta = (-(S * sigma * exp_qT * n_d1) / (2 * sqrtT) 
+                 + r * K * exp_rT * N_minus_d2 
+                 - q * S * exp_qT * N_minus_d1)
+    
+    theta = theta / 365.0  # Report per day
+
+    return float(delta), float(gamma), float(vega), float(theta)
 
 def moneyness_bucket_row(option_type, m):
     if pd.isna(m) or option_type not in ("call", "put"):
         return np.nan
 
     if option_type == "call":
-        if m < 0.80: return "Deep ITM"
+        if m < 0.85: return "Deep ITM"
         elif m < 0.95: return "ITM"
         elif m <= 1.05: return "ATM"
-        elif m <= 1.20: return "OTM"
+        elif m <= 1.15: return "OTM"
         else: return "Deep OTM"
 
-    if m > 1.20: return "Deep ITM"
+    if m > 1.15: return "Deep ITM"
     elif m > 1.05: return "ITM"
     elif m >= 0.95: return "ATM"
-    elif m >= 0.80: return "OTM"
+    elif m >= 0.85: return "OTM"
     else: return "Deep OTM"
 
 def compute_calculations(df: pd.DataFrame) -> pd.DataFrame:
@@ -61,12 +88,12 @@ def compute_calculations(df: pd.DataFrame) -> pd.DataFrame:
     
     # Flags
     out["low_premium_flag"] = out["lastPrice"].abs() < 1.0
-    out["far_tenor_flag"] = out["T_years"] > 1.0
+    out["far_tenor_flag"] = out["T_years"] > 0.5
     
-    # Delta
-    print("Computing Delta...")
-    out["delta"] = out.apply(
-        lambda row: bs_delta(
+    # Greeks
+    print("Computing Greeks (Delta, Gamma, Vega, Theta)...")
+    greeks = out.apply(
+        lambda row: bs_greeks(
             S=float(row["underlying_price"]),
             K=float(row["strike"]),
             T=float(row["T_years"]),
@@ -77,6 +104,7 @@ def compute_calculations(df: pd.DataFrame) -> pd.DataFrame:
         ),
         axis=1
     )
+    out[["delta", "gamma", "vega", "theta"]] = pd.DataFrame(greeks.tolist(), index=out.index)
     
     return out
 
@@ -97,7 +125,7 @@ def main():
     front = [
         "snapshot_ts_utc", "symbol", "underlying_price",
         "option_type", "expiration", "T_years",
-        "strike", "delta", "roe", "tot_return", "moneyness", "moneyness_bucket",
+        "strike", "delta", "gamma", "vega", "theta", "roe", "tot_return", "moneyness", "moneyness_bucket",
         "lastPrice", "bid", "ask", "volume", "openInterest", "impliedVolatility"
     ]
     cols = [c for c in front if c in processed_df.columns] + [c for c in processed_df.columns if c not in front]
