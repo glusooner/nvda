@@ -4,7 +4,7 @@ import numpy as np
 import pandas as pd
 import yfinance as yf
 
-TICKERS = ["NVDA", "TSLA"]
+TICKERS = ["NVDA", "TSLA","SPY"]
 OUTPUT_DIR = "option_data"
 
 os.makedirs(OUTPUT_DIR, exist_ok=True)
